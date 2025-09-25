@@ -1,3 +1,4 @@
+
 // SPDX-License-Identifier: GPL-2.0-only
 // Copyright (C) 2022, Input Labs Oy.
 
@@ -84,15 +85,47 @@ void gyro_absolute_output(float value, uint8_t *actions, bool *pressed) {
     }
 }
 
+#define STICK_DECAY 0.00  // Decaimiento por ciclo (ajusta según lo natural que quieras)
+#define STICK_GAIN  0.01  // Sensibilidad (ajusta según lo natural que quieras)
+
+
+// Convierte movimiento relativo de giroscopio a valor absoluto de stick [-1, 1]
+// Usa un acumulador por eje (debe ser estático o externo)
+double relative_gyro_to_stick(double rel, double *accum) {
+    *accum += rel * STICK_GAIN;
+    *accum *= (1.0 - STICK_DECAY);
+    if (*accum > 1.0) *accum = 1.0;
+    if (*accum < -1.0) *accum = -1.0;
+    return *accum;
+}
+
 void gyro_incremental_output(double value, uint8_t *actions) {
+    static double rx_accum = 0;
+    static double ry_accum = 0;
     for(uint8_t i=0; i<4; i++) {
         uint8_t action = actions[i];
         if      (action == MOUSE_X)     hid_mouse_move(value, 0);
         else if (action == MOUSE_Y)     hid_mouse_move(0, value);
         else if (action == MOUSE_X_NEG) hid_mouse_move(-value, 0);
         else if (action == MOUSE_Y_NEG) hid_mouse_move(0, -value);
+        else if (action == GAMEPAD_AXIS_RX) {
+            double stick_val = relative_gyro_to_stick(value, &rx_accum);
+            hid_gamepad_axis(RX, stick_val);
+        }
+        else if (action == GAMEPAD_AXIS_RX_NEG) {
+            double stick_val = relative_gyro_to_stick(-value, &rx_accum);
+            hid_gamepad_axis(RX, stick_val);
+        }
+        else if (action == GAMEPAD_AXIS_RY) {
+            double stick_val = relative_gyro_to_stick(-value, &ry_accum);
+            hid_gamepad_axis(RY, stick_val);
+        }else if (action == GAMEPAD_AXIS_RY_NEG) {
+            double stick_val = relative_gyro_to_stick(value, &ry_accum);
+            hid_gamepad_axis(RY, stick_val);
+        }
     }
 }
+
 
 double hssnf(double t, double k, double x) {
     double a = x - (x * k);
@@ -182,6 +215,7 @@ void Gyro__report_incremental(Gyro *self) {
     if (z >= 0) gyro_incremental_output( z, self->actions_z_pos);
     else        gyro_incremental_output(-z, self->actions_z_neg);
 }
+
 
 bool Gyro__is_engaged(Gyro *self) {
     if (self->engage == PIN_NONE) return false;
